@@ -1,7 +1,7 @@
 {
   "id": "cell-checkbox",
   "name": "Cell Checkbox",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "minAppVersion": "1.4.0",
   "description": "Tap to toggle [ ] / [O] checkboxes inside table cells. Designed for mobile/tablet — no virtual keyboard required.",
   "author": "buruss",
