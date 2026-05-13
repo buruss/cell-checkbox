@@ -1,80 +1,116 @@
 # Cell Checkbox
 
-Obsidian 플러그인 — 마크다운 **표 셀 안의** `[ ]` / `[O]` 를 탭/클릭만으로 토글한다. 모바일·태블릿에서 가상 키보드 없이 검토 시트류 문서를 빠르게 체크할 때 쓰는 용도.
+An Obsidian plugin that turns `[ ]` / `[O]` text inside Markdown table cells into tappable checkboxes. Designed for reviewing checklist-style tables on mobile and tablet without opening the virtual keyboard.
 
-## 사용 예
+## Example
 
 ```markdown
-| 단원       | 검토  | 비고  |
-| -------- | :-: | --- |
-| 1. 개요     | [O] |     |
-| 2. 본문     | [ ] |     |
-| 3. 결론     | [ ] |     |
+| Section    | Reviewed | Notes |
+| ---------- | :------: | ----- |
+| 1. Intro   | [O]      |       |
+| 2. Body    | [ ]      |       |
+| 3. Closing | [ ]      |       |
 ```
 
-- Reading view / Live Preview에서 `[ ]`, `[O]` 위치에 작은 체크박스가 표시됨
-- 탭하면 `[ ]` ↔ `[O]` 토글 (파일이 즉시 저장됨)
-- 모바일에서는 위젯을 탭해도 가상 키보드가 열리지 않음
+- In both Reading view and Live Preview, the `[ ]` / `[O]` text is rendered as a small checkbox widget.
+- Tap or click to toggle `[ ]` ↔ `[O]`. The source file is updated immediately.
+- On mobile, tapping the widget does not focus the editor, so the virtual keyboard stays closed.
+- In Source mode, the raw `[O]` text is left untouched.
 
-## 동작 원리
+## Installation
 
-이 플러그인은 **두 개의 독립된 렌더링 경로**를 가짐:
+### Option A — BRAT (recommended)
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs and auto-updates plugins straight from a GitHub repository, no manual file handling.
+
+1. In Obsidian, open **Settings → Community plugins** and install **Obsidian42 - BRAT**. Enable it.
+2. Open **Settings → BRAT → Add Beta plugin**.
+3. Paste the repository URL of this plugin (e.g. `https://github.com/<owner>/cell-checkbox`) and confirm.
+4. BRAT downloads the latest release, installs it, and from then on updates automatically whenever a new release is published.
+
+### Option B — Manual install
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest [Release](../../releases/latest).
+2. Copy them into `<your-vault>/.obsidian/plugins/cell-checkbox/`.
+3. Enable **Cell Checkbox** under **Settings → Community plugins**.
+
+## Settings
+
+**Settings → Cell Checkbox**
+
+- **Checked character** — the character placed inside the brackets to mark a cell as checked. Default is `O`. Use `x` if you prefer the Markdown task-list convention (`[x]` / `[ ]`). Must be a single non-whitespace character (no `[`, `]`, `\`, or whitespace).
+- **Debug logging** — verbose diagnostic logs in the developer console (Ctrl+Shift+I). Leave off unless you are filing a bug report.
+
+Changing the checked character re-renders open notes so the new convention takes effect immediately. Existing brackets in your files that use the old character will no longer be recognized — you may need to bulk-convert them.
+
+## How it works
+
+The plugin uses two complementary mechanisms to cover both Obsidian view modes, plus document-level event delegation so widgets remain interactive regardless of how the host DOM is re-rendered.
 
 ### Reading view
-- `registerMarkdownPostProcessor` 로 렌더된 `<td>`/`<th>` 안의 텍스트 노드와 native `<input type="checkbox">` 를 모두 위젯 `<span>` 으로 치환 (단, `<code>`/`<pre>` 내부는 제외)
-- 클릭 시 **행 fingerprint**(`<tr>` 셀 텍스트 join) + 셀 내 매치 인덱스로 소스 라인을 찾아 `app.vault.process()` 로 atomic 수정
+A registered Markdown post-processor walks rendered `<td>` and `<th>` elements, replacing bracket text patterns and any native task `<input type="checkbox">` Obsidian or other plugins emit inside the same cell. Content inside `<code>` / `<pre>` is skipped, so legend cells containing backticked `` `[ ]` `` stay untouched.
 
-### Live Preview (편집 모드)
-- CodeMirror 6 `ViewPlugin` 으로 표 라인의 `[ ]`/`[<설정 문자>]` 패턴을 `Decoration.replace` + 위젯으로 치환
-- 커서가 올라간 행은 위젯 대신 raw 소스로 보여줘 직접 편집 가능
-- `editorLivePreviewField` 로 Source mode 에서는 위젯을 만들지 않음 → 원본 보기 모드에서는 `[O]` 텍스트 그대로 표시
-- 클릭 시 `view.dispatch({changes})` 로 토글
+### Live Preview (editing mode)
+A `MutationObserver` watches the workspace for `<table>` elements rendered by CodeMirror's Live Preview widget. The same widget-injection logic runs against those tables, and a debounced re-process fires when the cell content changes (for example after a toggle re-renders the table).
 
-### 공통: 모바일 가상 키보드 차단
-- `pointerdown` / `mousedown` / `touchstart` 에서 `preventDefault()` → CodeMirror 가 contenteditable 에 포커스를 잡지 못하게 막음
-- 위젯에 `contenteditable="false"` 추가
+> An earlier prototype used a CodeMirror `ViewPlugin` with `Decoration.replace`, but Obsidian renders Live Preview tables via a block-level widget that hides any inline decoration inside its range. The DOM-observer approach mutates the already-rendered table directly and works reliably.
 
-## 빌드 & 설치 (수동)
+### Click handling — document-level delegation
+A single set of listeners on `document` intercepts `click`, `keydown`, `pointerdown`, `mousedown`, and `touchstart` events that originate from `.cell-checkbox` elements. The widget carries enough state (`data-file-path`, `data-row-fp`, `data-match-idx`) on its DOM node to identify itself when activated. This survives any DOM cloning or re-mounting the host might perform.
+
+### Row matching when toggling
+Each widget records its row fingerprint (the joined, normalized cell texts of its `<tr>`) and the bracket's index within the row. On click the plugin reads the source file, finds the table row whose fingerprint matches state-agnostically (treating both `[O]` and `[ ]` as `[?]` for the purposes of matching), locates the Nth bracket on that line, and toggles it via `app.vault.process()` for atomic write.
+
+Zero-width spaces and non-breaking spaces inserted by some table-editor plugins (e.g. `markdown-table-editor`, `table-extended`) are normalized out before matching.
+
+### Mobile keyboard suppression
+The delegated `pointerdown` / `mousedown` / `touchstart` handlers call `preventDefault()` and `stopPropagation()` in the capture phase before the editor sees them, preventing the contenteditable from claiming focus. Widgets also carry `contenteditable="false"`.
+
+## Limitations
+
+- Only the exact bracket forms `[ ]` ← → `[<checked-char>]` are toggled (case-sensitive).
+- A cell containing markdown emphasis around the bracket (e.g. `**[O]**`) may break fingerprint matching — plain text is assumed.
+- When the cursor is inside a table row in Live Preview, that row reverts to raw markdown so you can edit it directly. Widgets in the other rows continue to work.
+- The plugin coexists with `markdown-table-editor` / `table-extended`, but those plugins may insert their own native checkbox; the cell text is preferred over the native checkbox when both are present.
+
+## Development
 
 ```bash
 pnpm install
-pnpm approve-builds   # pnpm 11+ 에서 esbuild postinstall 1회 승인
-pnpm run build
+pnpm run dev      # esbuild watch mode
 ```
 
-> pnpm 11 이상은 의존성의 build script(여기선 esbuild의 플랫폼 바이너리 다운로드)를
-> 명시 승인해야 한다. `pnpm approve-builds` 한 번만 실행하면 이후엔 자동 동작.
-> npm 사용자는 `npm install && npm run build` 로 충분.
-
-빌드 결과물(`main.js`, `manifest.json`, `styles.css`)을 vault의
-`.obsidian/plugins/cell-checkbox/` 디렉토리로 복사한 뒤 Obsidian → Settings → Community plugins 에서 활성화.
-
-개발 중에는 vault의 플러그인 폴더에 본 디렉토리를 심볼릭 링크로 연결하면 편함:
+For convenient testing, junction the plugin folder directly into your vault:
 
 ```powershell
-# Windows (관리자 PowerShell)
+# Windows (admin PowerShell)
 New-Item -ItemType Junction `
   -Path "<vault>\.obsidian\plugins\cell-checkbox" `
   -Target "D:\obsidian-plugins\cell-checkbox"
 ```
 
+Production build:
+
 ```bash
-pnpm run dev   # watch mode
+pnpm run build    # tsc check + esbuild bundle
 ```
 
-## 설정
+> pnpm 11+ requires explicit approval for dependency build scripts (esbuild downloads its platform binary on install). The repo includes a `pnpm-workspace.yaml` that approves it. If you switch package managers, `npm install && npm run build` works without that step.
 
-Obsidian → Settings → Community plugins → **Cell Checkbox** 에서 변경 가능:
+## Releasing (maintainers)
 
-- **Checked character** — 체크 상태일 때 대괄호 안에 들어가는 문자 (기본 `O`).
-  - `O` (기본): `[O]` / `[ ]` 토글
-  - `x`: Markdown 표준 태스크 리스트 형식 (`[x]` / `[ ]`)
-  - 그 외 단일 문자도 입력 가능 (단, `[`, `]`, `\`, 공백은 금지)
+Releases are automated by `.github/workflows/release.yml`. To cut a new version:
 
-설정 변경 시 열려 있는 노트는 자동으로 다시 렌더됨. 단, 기존 파일에 다른 문자(예: 예전 `[O]`)가 남아 있으면 그 문자는 더 이상 인식되지 않으므로 일괄 변환이 필요할 수 있음.
+1. Bump the version in `manifest.json` (and `versions.json` if you want to declare a `minAppVersion` change). Commit.
+2. Create and push a matching git tag:
+   ```bash
+   git tag 0.2.0
+   git push origin 0.2.0
+   ```
+3. The workflow builds the plugin and creates a GitHub Release with `main.js`, `manifest.json`, and `styles.css` attached. BRAT users get the update automatically on their next sync.
 
-## 제약
+The workflow refuses to publish if the tag does not match `manifest.json`'s `version` field.
 
-- 토글은 정확히 `[ ]` (브래킷 - 스페이스 - 브래킷) ↔ `[<설정 문자>]` 만 다룸 (대소문자 구분)
-- 셀 안에 `**[O]**` 같은 마크다운 강조가 섞이면 fingerprint 매칭이 어긋날 수 있음 (plain text 가정)
-- Live Preview 에서 커서가 표 위에 있어 active 행이 소스 모드로 보일 때, 다른 행의 위젯은 정상 작동
+## License
+
+MIT — see [LICENSE](LICENSE).
