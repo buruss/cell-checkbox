@@ -32,9 +32,12 @@ jobs:
       - name: Verify tag matches manifest.json version
         run: |
           TAG="${GITHUB_REF_NAME}"
+          # Accept optional 'v' prefix (pnpm version always emits v-prefixed tags
+          # regardless of npmrc tag-version-prefix setting)
+          TAG_VERSION="${TAG#v}"
           MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
-          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
-            echo "::error::Tag '$TAG' does not match manifest.json version '$MANIFEST_VERSION'"
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::Tag '$TAG' (version=$TAG_VERSION) does not match manifest.json version '$MANIFEST_VERSION'"
             exit 1
           fi
 
