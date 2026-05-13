@@ -56,10 +56,13 @@ export function stripInlineMarkdown(s: string): string {
     .replace(/`[^`\n]+`/g, "")
     // Bold
     .replace(/\*\*([^*]+?)\*\*/g, "$1")
-    .replace(/__([^_]+?)__/g, "$1")
-    // Italic
+    // Bold underscore — only when not intraword (CommonMark rule). Avoids
+    // stripping identifiers like EMPTY_STRATEGY_CONFIG.
+    .replace(/(?<!\w)__([^_]+?)__(?!\w)/g, "$1")
+    // Italic asterisk — CommonMark permits intraword
     .replace(/\*([^*]+?)\*/g, "$1")
-    .replace(/_([^_]+?)_/g, "$1")
+    // Italic underscore — not intraword
+    .replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "$1")
     // Strikethrough
     .replace(/~~([^~]+?)~~/g, "$1");
 }
