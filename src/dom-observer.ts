@@ -74,7 +74,6 @@ export function setupDomObserver(plugin: CellCheckboxPlugin): () => void {
   });
 
   observer.observe(root, { childList: true, subtree: true });
-  console.warn(LOG, "MutationObserver started");
 
   return () => {
     observer.disconnect();

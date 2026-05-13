@@ -1,18 +1,14 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { App, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import { setupDomObserver } from "./dom-observer";
 import { createReadingViewProcessor } from "./reading-view";
 import { CellCheckboxSettings, DEFAULT_SETTINGS, isValidCheckChar } from "./shared";
 import { toggleInFile } from "./widget-injector";
-
-const BUILD_ID = "diag-4";
 
 export default class CellCheckboxPlugin extends Plugin {
   settings!: CellCheckboxSettings;
 
   async onload() {
     await this.loadSettings();
-    console.warn(`[cell-checkbox] LOADED build=${BUILD_ID}`, { settings: this.settings });
-    new Notice(`Cell Checkbox loaded (build=${BUILD_ID})`, 4000);
     this.addSettingTab(new CellCheckboxSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(createReadingViewProcessor(this));
 

@@ -59,7 +59,6 @@ function processRow(
       fingerprint,
       fingerprintForMatch: fingerprintForMatch(fingerprint, checkedChar),
       cellTexts,
-      rowHTML: row.outerHTML.slice(0, 500),
     });
   }
 
