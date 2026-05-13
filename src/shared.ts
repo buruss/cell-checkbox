@@ -29,10 +29,20 @@ export function isTableContentLine(line: string): boolean {
   return true;
 }
 
+// Strip invisible chars (ZWSP/ZWNJ/ZWJ/BOM) that some table-editor plugins insert
+// into rendered DOM, and normalize NBSP to regular space. Then trim.
+// Used to align DOM-derived fingerprints with source-derived ones.
+export function normalizeCellText(s: string): string {
+  return s
+    .replace(/[​‌‍﻿]/g, "")
+    .replace(/ /g, " ")
+    .trim();
+}
+
 export function computeSourceRowFingerprint(line: string): string {
   return line
     .split("|")
     .slice(1, -1)
-    .map((c) => c.trim())
+    .map((c) => normalizeCellText(c))
     .join("|");
 }

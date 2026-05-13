@@ -1,27 +1,24 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
-import { createLivePreviewExtension } from "./live-preview";
+import { setupDomObserver } from "./dom-observer";
 import { createReadingViewProcessor } from "./reading-view";
 import { CellCheckboxSettings, DEFAULT_SETTINGS, isValidCheckChar } from "./shared";
 
-const BUILD_ID = "diag-1";
+const BUILD_ID = "diag-2";
 
 export default class CellCheckboxPlugin extends Plugin {
   settings!: CellCheckboxSettings;
 
   async onload() {
     await this.loadSettings();
-    // Loud signals so we can confirm the new build is actually running
     console.warn(`[cell-checkbox] LOADED build=${BUILD_ID}`, { settings: this.settings });
     new Notice(`Cell Checkbox loaded (build=${BUILD_ID})`, 4000);
     this.addSettingTab(new CellCheckboxSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(createReadingViewProcessor(this));
-    try {
-      this.registerEditorExtension(createLivePreviewExtension(this));
-      console.warn("[cell-checkbox] CM6 extension registered");
-    } catch (err) {
-      console.error("[cell-checkbox] CM6 extension registration failed", err);
-      new Notice("Cell Checkbox: CM6 extension failed (see console)", 8000);
-    }
+    // DOM observer covers Live Preview (where Obsidian's block-level table
+    // widget overrides any CM6 inline decoration) and also serves as a
+    // safety net for Reading view.
+    const cleanup = setupDomObserver(this);
+    this.register(cleanup);
   }
 
   async loadSettings() {
