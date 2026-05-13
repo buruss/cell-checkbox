@@ -3,7 +3,7 @@ import { setupDomObserver } from "./dom-observer";
 import { createReadingViewProcessor } from "./reading-view";
 import { CellCheckboxSettings, DEFAULT_SETTINGS, isValidCheckChar } from "./shared";
 
-const BUILD_ID = "diag-2";
+const BUILD_ID = "diag-3";
 
 export default class CellCheckboxPlugin extends Plugin {
   settings!: CellCheckboxSettings;
@@ -14,11 +14,27 @@ export default class CellCheckboxPlugin extends Plugin {
     new Notice(`Cell Checkbox loaded (build=${BUILD_ID})`, 4000);
     this.addSettingTab(new CellCheckboxSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(createReadingViewProcessor(this));
-    // DOM observer covers Live Preview (where Obsidian's block-level table
-    // widget overrides any CM6 inline decoration) and also serves as a
-    // safety net for Reading view.
     const cleanup = setupDomObserver(this);
     this.register(cleanup);
+
+    // Diagnostic: log clicks on .cell-checkbox elements anywhere in the document
+    // to help distinguish "click doesn't reach widget" vs "click reaches but
+    // handler doesn't run" vs "handler runs but toggle fails".
+    const docClickLogger = (e: MouseEvent) => {
+      if (!this.settings.debug) return;
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest?.(".cell-checkbox")) return;
+      const widget = target.closest(".cell-checkbox") as HTMLElement;
+      console.log("[cell-checkbox][doc-click] click on widget", {
+        target: target.tagName,
+        widgetIsChecked: widget.classList.contains("is-checked"),
+        rowFp: widget.dataset.rowFp,
+        matchIdx: widget.dataset.matchIdx,
+        defaultPrevented: e.defaultPrevented,
+      });
+    };
+    document.addEventListener("click", docClickLogger, true);
+    this.register(() => document.removeEventListener("click", docClickLogger, true));
   }
 
   async loadSettings() {

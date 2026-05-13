@@ -3,6 +3,7 @@ import type CellCheckboxPlugin from "./main";
 import {
   buildPattern,
   computeSourceRowFingerprint,
+  fingerprintForMatch,
   isTableContentLine,
   normalizeCellText,
 } from "./shared";
@@ -16,8 +17,6 @@ export function processTableForCheckboxes(
   file: TFile,
 ): void {
   if (table.dataset[PROCESSED_FLAG]) return;
-  // Set flag BEFORE processing so observer-triggered mutations from our own
-  // DOM writes don't re-enter here.
   table.dataset[PROCESSED_FLAG] = "1";
 
   const rows = table.querySelectorAll("tr");
@@ -28,8 +27,6 @@ export function processTableForCheckboxes(
   });
 
   if (!touchedAny) {
-    // No widgets inserted — clear the flag so a later re-scan can retry
-    // (e.g., if the cell content changes to include brackets).
     delete table.dataset[PROCESSED_FLAG];
   } else if (plugin.settings.debug) {
     console.log(LOG, "processed table", { file: file.path });
@@ -45,22 +42,110 @@ function processRow(
   if (cells.length === 0) return false;
 
   const checkedChar = plugin.settings.checkedChar;
-  const cellTexts = cells.map((c) => reconstructCellText(c, checkedChar));
 
-  const test = buildPattern(checkedChar, false);
-  if (!cellTexts.some((t) => test.test(t))) return false;
+  // Per cell, decide whether it has TEXT brackets, NATIVE checkboxes, or nothing.
+  // If both are present (some plugins add a native checkbox next to the source
+  // text), prefer text to avoid double-counting.
+  const cellInfos = cells.map((c) => analyzeCell(c, checkedChar));
 
+  // If no cell has a bracket pattern, skip this row entirely
+  if (!cellInfos.some((i) => i.hasBracket)) return false;
+
+  const cellTexts = cellInfos.map((i) => i.fingerprintText);
   const fingerprint = cellTexts.join("|");
-  if (plugin.settings.debug) console.log(LOG, "row", { fingerprint, cellTexts });
+
+  if (plugin.settings.debug) {
+    console.log(LOG, "row", {
+      fingerprint,
+      fingerprintForMatch: fingerprintForMatch(fingerprint, checkedChar),
+      cellTexts,
+      rowHTML: row.outerHTML.slice(0, 500),
+    });
+  }
 
   let matchIdx = 0;
-  for (const cell of cells) {
-    matchIdx = processCellText(plugin, cell, fingerprint, matchIdx, file);
-  }
-  for (const cell of cells) {
-    matchIdx = processCellNativeCheckboxes(plugin, cell, fingerprint, matchIdx, file);
+  for (let i = 0; i < cells.length; i++) {
+    const info = cellInfos[i];
+    if (info.mode === "text") {
+      matchIdx = processCellText(plugin, cells[i], fingerprint, matchIdx, file);
+    } else if (info.mode === "native") {
+      matchIdx = processCellNativeCheckboxes(plugin, cells[i], fingerprint, matchIdx, file);
+    }
   }
   return matchIdx > 0;
+}
+
+interface CellInfo {
+  mode: "text" | "native" | "none";
+  hasBracket: boolean;
+  fingerprintText: string;
+}
+
+function analyzeCell(cell: HTMLElement, checkedChar: string): CellInfo {
+  // Pass 1: collect text content excluding native checkboxes
+  const textContent = collectTextSkippingNative(cell, checkedChar);
+  const textHasBracket = buildPattern(checkedChar, false).test(textContent);
+
+  if (textHasBracket) {
+    return {
+      mode: "text",
+      hasBracket: true,
+      fingerprintText: normalizeCellText(textContent),
+    };
+  }
+
+  // Pass 2: include native checkboxes
+  const fullContent = collectTextIncludingNative(cell, checkedChar);
+  const nativeHasBracket = buildPattern(checkedChar, false).test(fullContent);
+  return {
+    mode: nativeHasBracket ? "native" : "none",
+    hasBracket: nativeHasBracket,
+    fingerprintText: normalizeCellText(fullContent),
+  };
+}
+
+function collectTextSkippingNative(node: Node, checkedChar: string): string {
+  let result = "";
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      result += (child as Text).data;
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const el = child as HTMLElement;
+      if (el.tagName === "CODE" || el.tagName === "PRE") continue;
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "checkbox") continue;
+      if (el.classList?.contains("cell-checkbox")) {
+        // Existing widget — represent as its current logical bracket form
+        const v = el.getAttribute("aria-checked") === "true" ? checkedChar : " ";
+        result += `[${v}]`;
+        continue;
+      }
+      result += collectTextSkippingNative(el, checkedChar);
+    }
+  }
+  return result;
+}
+
+function collectTextIncludingNative(node: Node, checkedChar: string): string {
+  let result = "";
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      result += (child as Text).data;
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const el = child as HTMLElement;
+      if (el.tagName === "CODE" || el.tagName === "PRE") continue;
+      if (el.classList?.contains("cell-checkbox")) {
+        const v = el.getAttribute("aria-checked") === "true" ? checkedChar : " ";
+        result += `[${v}]`;
+        continue;
+      }
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "checkbox") {
+        result += (el as HTMLInputElement).checked ? `[${checkedChar}]` : "[ ]";
+        continue;
+      }
+      result += collectTextIncludingNative(el, checkedChar);
+    }
+  }
+  return result;
 }
 
 function processCellText(
@@ -77,7 +162,6 @@ function processCellText(
       let p: Node | null = node.parentNode;
       while (p && p !== cell) {
         if (p.nodeName === "CODE" || p.nodeName === "PRE") return NodeFilter.FILTER_REJECT;
-        // Skip text inside our own previously-inserted widgets
         if (p.nodeType === Node.ELEMENT_NODE && (p as HTMLElement).classList?.contains("cell-checkbox")) {
           return NodeFilter.FILTER_REJECT;
         }
@@ -126,35 +210,6 @@ function processCellNativeCheckboxes(
     matchIdx++;
   }
   return matchIdx;
-}
-
-function reconstructCellText(node: Node, checkedChar: string): string {
-  return normalizeCellText(collectText(node, checkedChar));
-}
-
-function collectText(node: Node, checkedChar: string): string {
-  let result = "";
-  for (const child of Array.from(node.childNodes)) {
-    if (child.nodeType === Node.TEXT_NODE) {
-      result += (child as Text).data;
-    } else if (child.nodeType === Node.ELEMENT_NODE) {
-      const el = child as HTMLElement;
-      if (el.tagName === "CODE" || el.tagName === "PRE") continue;
-      // If we've already converted this cell once, our widget span carries the
-      // logical bracket form via data-cb-value
-      if (el.classList?.contains("cell-checkbox")) {
-        const v = el.getAttribute("aria-checked") === "true" ? checkedChar : " ";
-        result += `[${v}]`;
-        continue;
-      }
-      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "checkbox") {
-        result += (el as HTMLInputElement).checked ? `[${checkedChar}]` : "[ ]";
-      } else {
-        result += collectText(el, checkedChar);
-      }
-    }
-  }
-  return result;
 }
 
 function replaceTextNode(
@@ -249,6 +304,7 @@ async function toggleInFile(
   if (!Number.isFinite(matchIdx)) return;
 
   const checkedChar = plugin.settings.checkedChar;
+  const rowFpMatch = fingerprintForMatch(rowFp, checkedChar);
 
   await plugin.app.vault.process(file, (data) => {
     const lines = data.split("\n");
@@ -257,7 +313,8 @@ async function toggleInFile(
       const line = lines[i];
       if (!isTableContentLine(line)) continue;
       const lineFp = computeSourceRowFingerprint(line);
-      if (lineFp !== rowFp) continue;
+      const lineFpMatch = fingerprintForMatch(lineFp, checkedChar);
+      if (lineFpMatch !== rowFpMatch) continue;
       matched = true;
 
       const re = buildPattern(checkedChar, true);
@@ -282,7 +339,10 @@ async function toggleInFile(
       }
     }
     if (!matched && plugin.settings.debug) {
-      console.warn(LOG, "no fingerprint match for row", { rowFp });
+      console.warn(LOG, "no fingerprint match for row", {
+        rowFp,
+        rowFpForMatch: rowFpMatch,
+      });
     }
     return data;
   });

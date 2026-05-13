@@ -46,3 +46,11 @@ export function computeSourceRowFingerprint(line: string): string {
     .map((c) => normalizeCellText(c))
     .join("|");
 }
+
+// State-agnostic version: collapses [O]/[ ] (and other matched brackets) to [?].
+// Used for matching DOM fingerprints to source rows when DOM and source may
+// disagree on bracket state (e.g., Obsidian renders [O] as a native unchecked
+// checkbox in table cells, which yields [ ] DOM-side but [O] source-side).
+export function fingerprintForMatch(rowFp: string, checkedChar: string): string {
+  return rowFp.replace(buildPattern(checkedChar, true), "[?]");
+}
