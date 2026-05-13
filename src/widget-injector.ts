@@ -28,8 +28,6 @@ export function processTableForCheckboxes(
 
   if (!touchedAny) {
     delete table.dataset[PROCESSED_FLAG];
-  } else if (plugin.settings.debug) {
-    console.log(LOG, "processed table", { file: file.path });
   }
 }
 
@@ -53,14 +51,6 @@ function processRow(
 
   const cellTexts = cellInfos.map((i) => i.fingerprintText);
   const fingerprint = cellTexts.join("|");
-
-  if (plugin.settings.debug) {
-    console.log(LOG, "row", {
-      fingerprint,
-      fingerprintForMatch: fingerprintForMatch(fingerprint, checkedChar),
-      cellTexts,
-    });
-  }
 
   let matchIdx = 0;
   for (let i = 0; i < cells.length; i++) {

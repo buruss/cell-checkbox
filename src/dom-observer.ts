@@ -2,8 +2,6 @@ import { App, TFile } from "obsidian";
 import type CellCheckboxPlugin from "./main";
 import { processTableForCheckboxes } from "./widget-injector";
 
-const LOG = "[cell-checkbox][observer]";
-
 export function setupDomObserver(plugin: CellCheckboxPlugin): () => void {
   const root = plugin.app.workspace.containerEl;
 
@@ -79,7 +77,6 @@ export function setupDomObserver(plugin: CellCheckboxPlugin): () => void {
     observer.disconnect();
     pending.forEach((id) => window.clearTimeout(id));
     pending.clear();
-    if (plugin.settings.debug) console.log(LOG, "MutationObserver disconnected");
   };
 }
 
