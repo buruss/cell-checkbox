@@ -78,12 +78,15 @@ class CheckboxWidget extends WidgetType {
   }
 }
 
+let cm6FirstCallLogged = false;
+
 export function createLivePreviewExtension(plugin: CellCheckboxPlugin): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
 
       constructor(view: EditorView) {
+        console.warn(LOG, "ViewPlugin constructed");
         this.decorations = this.build(view);
       }
 
@@ -95,6 +98,14 @@ export function createLivePreviewExtension(plugin: CellCheckboxPlugin): Extensio
 
       build(view: EditorView): DecorationSet {
         const livePreviewVal = view.state.field(editorLivePreviewField, false);
+        if (!cm6FirstCallLogged) {
+          cm6FirstCallLogged = true;
+          console.warn(LOG, "build first call", {
+            livePreviewVal,
+            visibleRanges: view.visibleRanges.length,
+            docLength: view.state.doc.length,
+          });
+        }
         if (plugin.settings.debug) {
           console.log(LOG, "build", {
             livePreviewVal,

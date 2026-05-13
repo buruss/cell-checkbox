@@ -7,9 +7,14 @@ import {
 } from "./shared";
 
 const LOG = "[cell-checkbox][reading]";
+let firstCallLogged = false;
 
 export function createReadingViewProcessor(plugin: CellCheckboxPlugin): MarkdownPostProcessor {
   return (el, ctx) => {
+    if (!firstCallLogged) {
+      firstCallLogged = true;
+      console.warn(LOG, "post-processor first call", { source: ctx.sourcePath, hasTables: el.querySelectorAll("table").length });
+    }
     const tables = el.querySelectorAll("table");
     if (tables.length === 0) return;
     if (plugin.settings.debug) console.log(LOG, "post-processor", { tables: tables.length, source: ctx.sourcePath });

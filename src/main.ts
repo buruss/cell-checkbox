@@ -1,17 +1,27 @@
-import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { createLivePreviewExtension } from "./live-preview";
 import { createReadingViewProcessor } from "./reading-view";
 import { CellCheckboxSettings, DEFAULT_SETTINGS, isValidCheckChar } from "./shared";
+
+const BUILD_ID = "diag-1";
 
 export default class CellCheckboxPlugin extends Plugin {
   settings!: CellCheckboxSettings;
 
   async onload() {
     await this.loadSettings();
-    console.log("[cell-checkbox] plugin loaded", { settings: this.settings });
+    // Loud signals so we can confirm the new build is actually running
+    console.warn(`[cell-checkbox] LOADED build=${BUILD_ID}`, { settings: this.settings });
+    new Notice(`Cell Checkbox loaded (build=${BUILD_ID})`, 4000);
     this.addSettingTab(new CellCheckboxSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(createReadingViewProcessor(this));
-    this.registerEditorExtension(createLivePreviewExtension(this));
+    try {
+      this.registerEditorExtension(createLivePreviewExtension(this));
+      console.warn("[cell-checkbox] CM6 extension registered");
+    } catch (err) {
+      console.error("[cell-checkbox] CM6 extension registration failed", err);
+      new Notice("Cell Checkbox: CM6 extension failed (see console)", 8000);
+    }
   }
 
   async loadSettings() {
