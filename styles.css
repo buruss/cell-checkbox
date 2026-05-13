@@ -1,0 +1,59 @@
+/* Cell Checkbox — interactive [O] / [ ] toggle inside table cells */
+
+.cell-checkbox {
+  display: inline-block;
+  vertical-align: middle;
+  width: 1.1em;
+  height: 1.1em;
+  border: 1.5px solid var(--checkbox-border-color, var(--text-muted));
+  border-radius: 3px;
+  background-color: var(--background-primary);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+  position: relative;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+  /* Prevent contenteditable cursor from landing inside */
+  caret-color: transparent;
+}
+
+.cell-checkbox:hover {
+  border-color: var(--interactive-accent);
+}
+
+.cell-checkbox:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.cell-checkbox.is-checked {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.cell-checkbox.is-checked::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 0.3em;
+  height: 0.55em;
+  border: solid var(--text-on-accent, #fff);
+  border-width: 0 0.15em 0.15em 0;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* Slightly larger touch target on mobile without changing visual size much */
+.is-mobile .cell-checkbox,
+body.is-mobile .cell-checkbox {
+  width: 1.25em;
+  height: 1.25em;
+}
+
+/* Settings tab: invalid input feedback */
+.cell-checkbox-input-invalid {
+  border-color: var(--color-red, #e03131) !important;
+  background-color: rgba(224, 49, 49, 0.08) !important;
+}
