@@ -35,15 +35,40 @@ export function isTableContentLine(line: string): boolean {
 export function normalizeCellText(s: string): string {
   return s
     .replace(/[​‌‍﻿]/g, "")
-    .replace(/ /g, " ")
+    .replace(/ /g, " ")
     .trim();
+}
+
+// Reduce inline markdown to its rendered plain-text equivalent so source-derived
+// fingerprints match DOM-derived ones. The DOM's textContent has already had
+// these markers consumed by the renderer; the source string still carries them.
+export function stripInlineMarkdown(s: string): string {
+  return s
+    // Images: drop entirely (DOM renders <img>, textContent is empty)
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    // Wikilinks: [[A|B]] -> B, [[A]] -> A
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, link: string, alias?: string) =>
+      alias ? alias : link,
+    )
+    // Markdown links: [text](url) -> text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    // Inline code: drop entirely (collectText skips CODE elements)
+    .replace(/`[^`\n]+`/g, "")
+    // Bold
+    .replace(/\*\*([^*]+?)\*\*/g, "$1")
+    .replace(/__([^_]+?)__/g, "$1")
+    // Italic
+    .replace(/\*([^*]+?)\*/g, "$1")
+    .replace(/_([^_]+?)_/g, "$1")
+    // Strikethrough
+    .replace(/~~([^~]+?)~~/g, "$1");
 }
 
 export function computeSourceRowFingerprint(line: string): string {
   return line
     .split("|")
     .slice(1, -1)
-    .map((c) => normalizeCellText(c))
+    .map((c) => normalizeCellText(stripInlineMarkdown(c)))
     .join("|");
 }
 
