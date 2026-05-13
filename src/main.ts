@@ -8,6 +8,7 @@ export default class CellCheckboxPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    console.log("[cell-checkbox] plugin loaded", { settings: this.settings });
     this.addSettingTab(new CellCheckboxSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(createReadingViewProcessor(this));
     this.registerEditorExtension(createLivePreviewExtension(this));
@@ -32,7 +33,6 @@ export default class CellCheckboxPlugin extends Plugin {
         editor?: { cm?: { dispatch?: (tr: { changes?: unknown }) => void } };
       };
       view?.previewMode?.rerender?.(true);
-      // Force CM6 to re-run decorations by dispatching an empty transaction
       view?.editor?.cm?.dispatch?.({});
     });
   }
@@ -76,6 +76,19 @@ class CellCheckboxSettingTab extends PluginSettingTab {
         text.inputEl.maxLength = 1;
         text.inputEl.style.width = "4em";
         text.inputEl.style.textAlign = "center";
+      });
+
+    new Setting(containerEl)
+      .setName("Debug logging")
+      .setDesc(
+        "Enable verbose diagnostic logs in the developer console (Ctrl+Shift+I). " +
+          "Use this when reporting issues so the plugin author can see what's happening.",
+      )
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.debug).onChange(async (value) => {
+          this.plugin.settings.debug = value;
+          await this.plugin.saveSettings();
+        });
       });
   }
 }

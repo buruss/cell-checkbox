@@ -1,9 +1,11 @@
 export interface CellCheckboxSettings {
   checkedChar: string;
+  debug: boolean;
 }
 
 export const DEFAULT_SETTINGS: CellCheckboxSettings = {
   checkedChar: "O",
+  debug: false,
 };
 
 export function isValidCheckChar(ch: string): boolean {

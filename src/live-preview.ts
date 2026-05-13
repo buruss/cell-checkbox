@@ -12,11 +12,14 @@ import {
 import type CellCheckboxPlugin from "./main";
 import { buildPattern, isTableContentLine } from "./shared";
 
+const LOG = "[cell-checkbox][live-preview]";
+
 class CheckboxWidget extends WidgetType {
   constructor(
     readonly checked: boolean,
     readonly checkedChar: string,
     readonly pos: number,
+    readonly plugin: CellCheckboxPlugin,
   ) {
     super();
   }
@@ -35,6 +38,7 @@ class CheckboxWidget extends WidgetType {
     span.dataset.pos = String(this.pos);
 
     const checkedChar = this.checkedChar;
+    const plugin = this.plugin;
 
     const block = (e: Event) => {
       e.preventDefault();
@@ -46,9 +50,13 @@ class CheckboxWidget extends WidgetType {
       const pos = Number(span.dataset.pos);
       if (!Number.isFinite(pos)) return;
       const slice = view.state.doc.sliceString(pos, pos + 3);
-      if (slice.length !== 3 || slice[0] !== "[" || slice[2] !== "]") return;
+      if (slice.length !== 3 || slice[0] !== "[" || slice[2] !== "]") {
+        if (plugin.settings.debug) console.warn(LOG, "stale pos, slice mismatch", { pos, slice });
+        return;
+      }
       const current = slice[1];
       const newCh = current === " " ? checkedChar : " ";
+      if (plugin.settings.debug) console.log(LOG, "widget clicked", { pos, from: current, to: newCh });
       view.dispatch({
         changes: { from: pos + 1, to: pos + 2, insert: newCh },
       });
@@ -86,14 +94,22 @@ export function createLivePreviewExtension(plugin: CellCheckboxPlugin): Extensio
       }
 
       build(view: EditorView): DecorationSet {
-        const isLivePreview = view.state.field(editorLivePreviewField, false);
-        if (!isLivePreview) return Decoration.none;
+        const livePreviewVal = view.state.field(editorLivePreviewField, false);
+        if (plugin.settings.debug) {
+          console.log(LOG, "build", {
+            livePreviewVal,
+            isLivePreview: !!livePreviewVal,
+            visibleRanges: view.visibleRanges.length,
+          });
+        }
+        if (!livePreviewVal) return Decoration.none;
 
         const builder = new RangeSetBuilder<Decoration>();
         const cursor = view.state.selection.main;
         const checkedChar = plugin.settings.checkedChar;
         const re = buildPattern(checkedChar, true);
 
+        let widgetCount = 0;
         for (const { from, to } of view.visibleRanges) {
           let pos = from;
           while (pos <= to) {
@@ -112,9 +128,10 @@ export function createLivePreviewExtension(plugin: CellCheckboxPlugin): Extensio
                     start,
                     end,
                     Decoration.replace({
-                      widget: new CheckboxWidget(checked, checkedChar, start),
+                      widget: new CheckboxWidget(checked, checkedChar, start, plugin),
                     }),
                   );
+                  widgetCount++;
                 }
               }
             }
@@ -123,6 +140,7 @@ export function createLivePreviewExtension(plugin: CellCheckboxPlugin): Extensio
           }
         }
 
+        if (plugin.settings.debug) console.log(LOG, "built decorations", { widgetCount });
         return builder.finish();
       }
     },

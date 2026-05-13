@@ -6,9 +6,13 @@ import {
   isTableContentLine,
 } from "./shared";
 
+const LOG = "[cell-checkbox][reading]";
+
 export function createReadingViewProcessor(plugin: CellCheckboxPlugin): MarkdownPostProcessor {
   return (el, ctx) => {
     const tables = el.querySelectorAll("table");
+    if (tables.length === 0) return;
+    if (plugin.settings.debug) console.log(LOG, "post-processor", { tables: tables.length, source: ctx.sourcePath });
     tables.forEach((table) => processTable(plugin, table, ctx));
   };
 }
@@ -31,19 +35,91 @@ function processRow(
   if (cells.length === 0) return;
 
   const checkedChar = plugin.settings.checkedChar;
+  // Reconstruct cell texts for fingerprinting, accounting for native task checkboxes
   const cellTexts = cells.map((c) => reconstructCellText(c, checkedChar));
+
   const test = buildPattern(checkedChar, false);
   if (!cellTexts.some((t) => test.test(t))) return;
 
   const fingerprint = cellTexts.join("|");
+  if (plugin.settings.debug) console.log(LOG, "row", { fingerprint, cellTexts });
 
+  // PASS 1: replace text-based patterns ([O]/[ ]) via TreeWalker (proven path)
   let matchIdx = 0;
   for (const cell of cells) {
-    matchIdx = processNode(plugin, cell, cell, fingerprint, matchIdx, ctx);
+    matchIdx = processCellText(plugin, cell, fingerprint, matchIdx, ctx);
+  }
+  // PASS 2: also swap any native <input type="checkbox"> in the same row, in DOM order
+  for (const cell of cells) {
+    matchIdx = processCellNativeCheckboxes(plugin, cell, fingerprint, matchIdx, ctx);
   }
 }
 
-// Reconstruct cell text including bracket-form for native task checkboxes
+function processCellText(
+  plugin: CellCheckboxPlugin,
+  cell: HTMLElement,
+  rowFingerprint: string,
+  startMatchIdx: number,
+  ctx: MarkdownPostProcessorContext,
+): number {
+  let matchIdx = startMatchIdx;
+  const test = buildPattern(plugin.settings.checkedChar, false);
+  const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      let p: Node | null = node.parentNode;
+      while (p && p !== cell) {
+        if (p.nodeName === "CODE" || p.nodeName === "PRE") return NodeFilter.FILTER_REJECT;
+        p = p.parentNode;
+      }
+      return test.test((node as Text).data)
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_SKIP;
+    },
+  });
+
+  const targets: Text[] = [];
+  let n: Node | null;
+  while ((n = walker.nextNode())) targets.push(n as Text);
+
+  for (const textNode of targets) {
+    matchIdx = replaceTextNode(plugin, textNode, rowFingerprint, matchIdx, ctx);
+  }
+  return matchIdx;
+}
+
+function processCellNativeCheckboxes(
+  plugin: CellCheckboxPlugin,
+  cell: HTMLElement,
+  rowFingerprint: string,
+  startMatchIdx: number,
+  ctx: MarkdownPostProcessorContext,
+): number {
+  let matchIdx = startMatchIdx;
+  const inputs = Array.from(
+    cell.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  );
+  for (const input of inputs) {
+    // Skip if inside <code> or <pre>
+    let p: Node | null = input.parentNode;
+    let skip = false;
+    while (p && p !== cell) {
+      if (p.nodeName === "CODE" || p.nodeName === "PRE") {
+        skip = true;
+        break;
+      }
+      p = p.parentNode;
+    }
+    if (skip) continue;
+    const widget = createWidget(plugin, input.checked, rowFingerprint, matchIdx, ctx);
+    input.parentNode?.replaceChild(widget, input);
+    matchIdx++;
+    if (plugin.settings.debug) console.log(LOG, "replaced native checkbox", { checked: input.checked, matchIdx: matchIdx - 1 });
+  }
+  return matchIdx;
+}
+
+// Reconstruct a cell's logical text, converting native task checkboxes back to bracket form.
+// Used only for fingerprinting; does not mutate the DOM.
 function reconstructCellText(node: Node, checkedChar: string): string {
   let result = "";
   for (const child of Array.from(node.childNodes)) {
@@ -62,36 +138,6 @@ function reconstructCellText(node: Node, checkedChar: string): string {
   return result.trim();
 }
 
-function processNode(
-  plugin: CellCheckboxPlugin,
-  cell: HTMLElement,
-  node: Node,
-  rowFingerprint: string,
-  startMatchIdx: number,
-  ctx: MarkdownPostProcessorContext,
-): number {
-  let matchIdx = startMatchIdx;
-  const children = Array.from(node.childNodes);
-
-  for (const child of children) {
-    if (child.nodeType === Node.TEXT_NODE) {
-      matchIdx = replaceTextNode(plugin, child as Text, rowFingerprint, matchIdx, ctx);
-    } else if (child.nodeType === Node.ELEMENT_NODE) {
-      const el = child as HTMLElement;
-      if (el.tagName === "CODE" || el.tagName === "PRE") continue;
-      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "checkbox") {
-        const checked = (el as HTMLInputElement).checked;
-        const widget = createWidget(plugin, checked, rowFingerprint, matchIdx, ctx);
-        el.parentNode?.replaceChild(widget, el);
-        matchIdx++;
-      } else {
-        matchIdx = processNode(plugin, cell, el, rowFingerprint, matchIdx, ctx);
-      }
-    }
-  }
-  return matchIdx;
-}
-
 function replaceTextNode(
   plugin: CellCheckboxPlugin,
   textNode: Text,
@@ -106,8 +152,6 @@ function replaceTextNode(
 
   const checkedChar = plugin.settings.checkedChar;
   const re = buildPattern(checkedChar, true);
-  if (!re.test(text)) return matchIdx;
-  re.lastIndex = 0;
 
   const frag = document.createDocumentFragment();
   let last = 0;
@@ -121,6 +165,7 @@ function replaceTextNode(
     matchIdx++;
     last = m.index + 3;
   }
+  if (last === 0) return matchIdx; // no match found in this text node
   if (last < text.length) {
     frag.appendChild(document.createTextNode(text.slice(last)));
   }
@@ -140,7 +185,6 @@ function createWidget(
   span.setAttribute("role", "checkbox");
   span.setAttribute("aria-checked", checked ? "true" : "false");
   span.setAttribute("tabindex", "0");
-  // Prevent the contenteditable host (Live Preview's rendered table) from claiming this node
   span.setAttribute("contenteditable", "false");
   span.dataset.rowFp = rowFingerprint;
   span.dataset.matchIdx = String(matchIdx);
@@ -152,6 +196,13 @@ function createWidget(
   const activate = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
+    if (plugin.settings.debug) {
+      console.log(LOG, "widget clicked", {
+        rowFp: span.dataset.rowFp,
+        matchIdx: span.dataset.matchIdx,
+        currentlyChecked: checked,
+      });
+    }
     void toggleInFile(plugin, span, ctx);
   };
 
@@ -173,7 +224,10 @@ async function toggleInFile(
   ctx: MarkdownPostProcessorContext,
 ) {
   const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
-  if (!(file instanceof TFile)) return;
+  if (!(file instanceof TFile)) {
+    if (plugin.settings.debug) console.warn(LOG, "no TFile for", ctx.sourcePath);
+    return;
+  }
 
   const rowFp = widget.dataset.rowFp;
   const matchIdxStr = widget.dataset.matchIdx;
@@ -185,10 +239,13 @@ async function toggleInFile(
 
   await plugin.app.vault.process(file, (data) => {
     const lines = data.split("\n");
+    let matched = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!isTableContentLine(line)) continue;
-      if (computeSourceRowFingerprint(line) !== rowFp) continue;
+      const lineFp = computeSourceRowFingerprint(line);
+      if (lineFp !== rowFp) continue;
+      matched = true;
 
       const re = buildPattern(checkedChar, true);
       let count = 0;
@@ -196,11 +253,23 @@ async function toggleInFile(
       while ((m = re.exec(line)) !== null) {
         if (count === matchIdx) {
           const newCh = m[1] === " " ? checkedChar : " ";
+          if (plugin.settings.debug) {
+            console.log(LOG, "toggling", {
+              lineIdx: i,
+              matchIdx,
+              from: m[1],
+              to: newCh,
+              col: m.index,
+            });
+          }
           lines[i] = line.slice(0, m.index) + "[" + newCh + "]" + line.slice(m.index + 3);
           return lines.join("\n");
         }
         count++;
       }
+    }
+    if (!matched && plugin.settings.debug) {
+      console.warn(LOG, "no fingerprint match for row", { rowFp });
     }
     return data;
   });
