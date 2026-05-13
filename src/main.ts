@@ -1,9 +1,10 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import { setupDomObserver } from "./dom-observer";
 import { createReadingViewProcessor } from "./reading-view";
 import { CellCheckboxSettings, DEFAULT_SETTINGS, isValidCheckChar } from "./shared";
+import { toggleInFile } from "./widget-injector";
 
-const BUILD_ID = "diag-3";
+const BUILD_ID = "diag-4";
 
 export default class CellCheckboxPlugin extends Plugin {
   settings!: CellCheckboxSettings;
@@ -14,27 +15,83 @@ export default class CellCheckboxPlugin extends Plugin {
     new Notice(`Cell Checkbox loaded (build=${BUILD_ID})`, 4000);
     this.addSettingTab(new CellCheckboxSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(createReadingViewProcessor(this));
+
     const cleanup = setupDomObserver(this);
     this.register(cleanup);
 
-    // Diagnostic: log clicks on .cell-checkbox elements anywhere in the document
-    // to help distinguish "click doesn't reach widget" vs "click reaches but
-    // handler doesn't run" vs "handler runs but toggle fails".
-    const docClickLogger = (e: MouseEvent) => {
-      if (!this.settings.debug) return;
+    this.registerWidgetEventDelegation();
+  }
+
+  // Document-level event delegation. Per-widget listeners proved unreliable —
+  // Reading view's post-processed widgets received clicks but listeners didn't
+  // fire (likely the DOM is cloned/re-mounted somewhere between attachment and
+  // user interaction). A single document handler always fires.
+  private registerWidgetEventDelegation() {
+    const findWidget = (e: Event): HTMLElement | null => {
       const target = e.target as HTMLElement | null;
-      if (!target?.closest?.(".cell-checkbox")) return;
-      const widget = target.closest(".cell-checkbox") as HTMLElement;
-      console.log("[cell-checkbox][doc-click] click on widget", {
-        target: target.tagName,
-        widgetIsChecked: widget.classList.contains("is-checked"),
+      return target?.closest?.(".cell-checkbox") as HTMLElement | null;
+    };
+
+    // Prevent focus changes / virtual keyboard (capture phase, before editor handlers)
+    const focusBlock = (e: Event) => {
+      if (!findWidget(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener("pointerdown", focusBlock, { capture: true });
+    document.addEventListener("mousedown", focusBlock, { capture: true });
+    document.addEventListener("touchstart", focusBlock, { capture: true, passive: false });
+
+    // Click → toggle
+    const onClick = (e: MouseEvent) => {
+      const widget = findWidget(e);
+      if (!widget) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.handleWidgetActivate(widget);
+    };
+    document.addEventListener("click", onClick, true);
+
+    // Keyboard accessibility
+    const onKey = (e: KeyboardEvent) => {
+      const widget = findWidget(e);
+      if (!widget) return;
+      if (e.key !== " " && e.key !== "Enter") return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.handleWidgetActivate(widget);
+    };
+    document.addEventListener("keydown", onKey, true);
+
+    this.register(() => {
+      document.removeEventListener("pointerdown", focusBlock, { capture: true } as EventListenerOptions);
+      document.removeEventListener("mousedown", focusBlock, { capture: true } as EventListenerOptions);
+      document.removeEventListener("touchstart", focusBlock, { capture: true } as EventListenerOptions);
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKey, true);
+    });
+  }
+
+  private handleWidgetActivate(widget: HTMLElement) {
+    const filePath = widget.dataset.filePath;
+    if (!filePath) {
+      if (this.settings.debug) console.warn("[cell-checkbox] widget missing filePath", widget);
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) {
+      if (this.settings.debug) console.warn("[cell-checkbox] file not found", filePath);
+      return;
+    }
+    if (this.settings.debug) {
+      console.log("[cell-checkbox][delegate] widget activated", {
         rowFp: widget.dataset.rowFp,
         matchIdx: widget.dataset.matchIdx,
-        defaultPrevented: e.defaultPrevented,
+        isChecked: widget.classList.contains("is-checked"),
+        file: filePath,
       });
-    };
-    document.addEventListener("click", docClickLogger, true);
-    this.register(() => document.removeEventListener("click", docClickLogger, true));
+    }
+    void toggleInFile(this, widget as HTMLSpanElement, file);
   }
 
   async loadSettings() {

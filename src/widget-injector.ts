@@ -248,7 +248,7 @@ function replaceTextNode(
 }
 
 function createWidget(
-  plugin: CellCheckboxPlugin,
+  _plugin: CellCheckboxPlugin,
   checked: boolean,
   rowFingerprint: string,
   matchIdx: number,
@@ -262,37 +262,12 @@ function createWidget(
   span.setAttribute("contenteditable", "false");
   span.dataset.rowFp = rowFingerprint;
   span.dataset.matchIdx = String(matchIdx);
-
-  const block = (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-  const activate = (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (plugin.settings.debug) {
-      console.log(LOG, "widget clicked", {
-        rowFp: span.dataset.rowFp,
-        matchIdx: span.dataset.matchIdx,
-        currentlyChecked: checked,
-        file: file.path,
-      });
-    }
-    void toggleInFile(plugin, span, file);
-  };
-
-  span.addEventListener("pointerdown", block);
-  span.addEventListener("mousedown", block);
-  span.addEventListener("touchstart", block, { passive: false });
-  span.addEventListener("click", activate);
-  span.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") activate(e);
-  });
-
+  span.dataset.filePath = file.path;
+  // Event handling is delegated at the document level (see main.ts).
   return span;
 }
 
-async function toggleInFile(
+export async function toggleInFile(
   plugin: CellCheckboxPlugin,
   widget: HTMLSpanElement,
   file: TFile,
