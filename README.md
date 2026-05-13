@@ -18,10 +18,21 @@ Obsidian 플러그인 — 마크다운 **표 셀 안의** `[ ]` / `[O]` 를 탭/
 
 ## 동작 원리
 
-- `registerMarkdownPostProcessor` 로 렌더된 `<td>`/`<th>` 안의 텍스트 노드를 스캔
-- `\[([O ])\]` 패턴을 위젯 `<span>` 으로 치환 (단, `<code>`/`<pre>` 내부는 제외)
+이 플러그인은 **두 개의 독립된 렌더링 경로**를 가짐:
+
+### Reading view
+- `registerMarkdownPostProcessor` 로 렌더된 `<td>`/`<th>` 안의 텍스트 노드와 native `<input type="checkbox">` 를 모두 위젯 `<span>` 으로 치환 (단, `<code>`/`<pre>` 내부는 제외)
 - 클릭 시 **행 fingerprint**(`<tr>` 셀 텍스트 join) + 셀 내 매치 인덱스로 소스 라인을 찾아 `app.vault.process()` 로 atomic 수정
-- `pointerdown` / `mousedown` / `touchstart` 에서 `preventDefault()` → CodeMirror 가 contenteditable 에 포커스를 잡지 못하게 막아 모바일 가상 키보드 차단
+
+### Live Preview (편집 모드)
+- CodeMirror 6 `ViewPlugin` 으로 표 라인의 `[ ]`/`[<설정 문자>]` 패턴을 `Decoration.replace` + 위젯으로 치환
+- 커서가 올라간 행은 위젯 대신 raw 소스로 보여줘 직접 편집 가능
+- `editorLivePreviewField` 로 Source mode 에서는 위젯을 만들지 않음 → 원본 보기 모드에서는 `[O]` 텍스트 그대로 표시
+- 클릭 시 `view.dispatch({changes})` 로 토글
+
+### 공통: 모바일 가상 키보드 차단
+- `pointerdown` / `mousedown` / `touchstart` 에서 `preventDefault()` → CodeMirror 가 contenteditable 에 포커스를 잡지 못하게 막음
+- 위젯에 `contenteditable="false"` 추가
 
 ## 빌드 & 설치 (수동)
 
